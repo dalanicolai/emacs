@@ -1,0 +1,307 @@
+Copyright (C) 2001-2022 Free Software Foundation, Inc.
+See the end of the file for license conditions.
+
+* This branch
+This is a feature branch for adding continuous scroll to Emacs
+doc-view (and pdf-tools).
+
+* Development notes
+The code in the doc-view package (and even more pdf-tools) is not
+trivial. In order to understand the code, we keep notes here where we
+describe or map out the working mechanism behind the package.
+
+Here is an edebug trace for opening a document, where we have left out
+the calls to some none essential functions (divided over two example
+blocks so that we can fold them separately):
+
+#+begin_example
+{ doc-view-mode args: nil
+:{ doc-view-set-up-single-converter args: nil
+:} doc-view-set-up-single-converter result: page-%s.png
+:{ doc-view-make-safe-dir args: (/tmp/docview1000)
+:} doc-view-make-safe-dir result: nil
+:{ image-mode-setup-winprops args: nil
+:} image-mode-setup-winprops result: (image-mode-reapply-winprops t)
+:{ doc-view-initiate-display args: nil
+::{ doc-view-buffer-message args: nil
+:::{ image-mode-window-get args: (overlay nil)
+::::{ image-mode-winprops args: (nil nil)
+:::::{ doc-view-new-window-function args: ((t))
+::::::{ image-mode-window-get args: (overlay (t))
+::::::} image-mode-window-get result: nil
+::::::{ image-mode-window-put args: (overlay #<overlay in no buffer> (t))
+::::::} image-mode-window-put result: ((overlay . #<overlay in no buffer>))
+:::::} doc-view-new-window-function result: nil
+::::} image-mode-winprops result: (t (overlay . #<overlay in no buffer>))
+:::} image-mode-window-get result: #<overlay in no buffer>
+:::{ image-mode-window-get args: (overlay nil)
+::::{ image-mode-winprops args: (nil nil)
+::::} image-mode-winprops result: (t (overlay . #<overlay in no buffer>))
+:::} image-mode-window-get result: #<overlay in no buffer>
+::} doc-view-buffer-message result: Welcome to DocView!
+
+If you see this buffer it means that ....
+#+end_example
+@@html:<details><summary>show trace remainder</summary>@@
+#+begin_example
+::{ image-mode-window-get args: (page nil)
+:::{ image-mode-winprops args: (nil nil)
+:::} image-mode-winprops result: (t (overlay . #<overlay in no buffer>))
+::} image-mode-window-get result: nil
+::{ image-mode-window-put args: (page 1 nil)
+:::{ image-mode-winprops args: (nil nil)
+:::} image-mode-winprops result: (t (overlay . #<overlay in no buffer>))
+::} image-mode-window-put result: ((page . 1) (overlay . #<overlay in no buffer>))
+::{ doc-view-already-converted-p args: nil
+:::{ doc-view--current-cache-dir args: nil
+::::{ doc-view-make-safe-dir args: (/tmp/docview1000)
+::::} doc-view-make-safe-dir result: nil
+:::} doc-view--current-cache-dir result: /tmp/docview1000/GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf-dce847ffdfa273bf0fc346f8c3c5927a/
+:::{ doc-view--current-cache-dir args: nil
+:::} doc-view--current-cache-dir result: /tmp/docview1000/GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf-dce847ffdfa273bf0fc346f8c3c5927a/
+:::{ doc-view--current-cache-dir args: nil
+:::} doc-view--current-cache-dir result: /tmp/docview1000/GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf-dce847ffdfa273bf0fc346f8c3c5927a/
+::} doc-view-already-converted-p result: t
+::{ doc-view--current-cache-dir args: nil
+::} doc-view--current-cache-dir result: /tmp/docview1000/GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf-dce847ffdfa273bf0fc346f8c3c5927a/
+::{ doc-view-display args: (GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf force)
+:::{ doc-view--current-cache-dir args: nil
+:::} doc-view--current-cache-dir result: /tmp/docview1000/GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf-dce847ffdfa273bf0fc346f8c3c5927a/
+:::{ image-mode-window-get args: (page t)
+::::{ image-mode-winprops args: (t nil)
+::::} image-mode-winprops result: (t (page . 1) (overlay . #<overlay in no buffer>))
+:::} image-mode-window-get result: 1
+:::{ doc-view--current-cache-dir args: nil
+:::} doc-view--current-cache-dir result: /tmp/docview1000/GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf-dce847ffdfa273bf0fc346f8c3c5927a/
+:::{ doc-view-goto-page args: (1)
+::::{ doc-view-last-page-number args: nil
+::::} doc-view-last-page-number result: 1337
+::::{ image-mode-window-put args: (page 1 nil)
+:::::{ image-mode-winprops args: (nil nil)
+:::::} image-mode-winprops result: (t (page . 1) (overlay . #<overlay in no buffer>))
+::::} image-mode-window-put result: ((page . 1) (overlay . #<overlay in no buffer>))
+::::{ image-mode-window-put args: (info Page 1 of 1337.
+ nil)
+:::::{ image-mode-winprops args: (nil nil)
+:::::} image-mode-winprops result: (t (page . 1) (overlay . #<overlay in no buffer>))
+::::} image-mode-window-put result: ((info . Page 1 of 1337.
+) (page . 1) (overlay . #<overlay in no buffer>))
+::::{ doc-view--current-cache-dir args: nil
+::::} doc-view--current-cache-dir result: /tmp/docview1000/GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf-dce847ffdfa273bf0fc346f8c3c5927a/
+::::{ doc-view-insert-image args: (/tmp/docview1000/GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf-dce847ffdfa273bf0fc346f8c3c5927a/page-1.png (:pointer arrow))
+:::::{ image-mode-window-get args: (overlay nil)
+::::::{ image-mode-winprops args: (nil nil)
+::::::} image-mode-winprops result: (t (info . Page 1 of 1337.
+) (page . 1) (overlay . #<overlay in no buffer>))
+:::::} image-mode-window-get result: #<overlay in no buffer>
+::::} doc-view-insert-image result: nil
+::::{ image-mode-window-get args: (overlay nil)
+:::::{ image-mode-winprops args: (nil nil)
+:::::} image-mode-winprops result: (t (info . Page 1 of 1337.
+) (page . 1) (overlay . #<overlay in no buffer>))
+::::} image-mode-window-get result: #<overlay in no buffer>
+::::{ image-mode-window-get args: (info nil)
+:::::{ image-mode-winprops args: (nil nil)
+:::::} image-mode-winprops result: (t (info . Page 1 of 1337.
+) (page . 1) (overlay . #<overlay in no buffer>))
+::::} image-mode-window-get result: Page 1 of 1337.
+
+:::} doc-view-goto-page result: Page 1 of 1337.
+
+::} doc-view-display result: nil
+:} doc-view-initiate-display result: Type C-c C-c to toggle between editing or viewing the document.
+} doc-view-mode result: nil
+{ image-mode-reapply-winprops args: nil
+:{ image-mode-winprops args: (nil t)
+::{ edebug-anon1613 args: ((t (info . Page 1 of 1337.
+) (page . 1) (overlay . #<overlay in no buffer>)))
+::} edebug-anon1613 result: (t (info . Page 1 of 1337.
+) (page . 1) (overlay . #<overlay in no buffer>))
+::{ doc-view-new-window-function args: ((#<window 3 on GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf> (info . Page 1 of 1337.
+) (page . 1) (overlay . #<overlay in no buffer>)))
+:::{ image-mode-window-get args: (overlay (#<window 3 on GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf> (info . Page 1 of 1337.
+) (page . 1) (overlay . #<overlay in no buffer>)))
+:::} image-mode-window-get result: #<overlay in no buffer>
+:::{ image-mode-window-put args: (overlay #<overlay from 1 to 7030463 in GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf> (#<window 3 on GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf> (info . Page 1 of 1337.
+) (page . 1) (overlay . #<overlay in no buffer>)))
+::::{ image-mode-window-put args: (overlay #<overlay from 1 to 7030463 in GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf> t)
+:::::{ image-mode-winprops args: (t nil)
+:::::} image-mode-winprops result: (t (info . Page 1 of 1337.
+) (page . 1) (overlay . #<overlay in no buffer>))
+::::} image-mode-window-put result: ((overlay . #<overlay from 1 to 7030463 in GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf>) (info . Page 1 of 1337.
+) (page . 1))
+:::} image-mode-window-put result: ((overlay . #<overlay from 1 to 7030463 in GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf>) (info . Page 1 of 1337.
+) (page . 1))
+:::{ image-mode-window-get args: (page t)
+::::{ image-mode-winprops args: (t nil)
+::::} image-mode-winprops result: (t (overlay . #<overlay from 1 to 7030463 in GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf>) (info . Page 1 of 1337.
+) (page . 1))
+:::} image-mode-window-get result: 1
+:::{ doc-view-goto-page args: (1)
+::::{ doc-view-last-page-number args: nil
+::::} doc-view-last-page-number result: 1337
+::::{ image-mode-window-put args: (page 1 nil)
+:::::{ image-mode-winprops args: (nil nil)
+:::::} image-mode-winprops result: (#<window 3 on GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf> (overlay . #<overlay from 1 to 7030463 in GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf>) (info . Page 1 of 1337.
+) (page . 1))
+:::::{ image-mode-window-put args: (page 1 t)
+::::::{ image-mode-winprops args: (t nil)
+::::::} image-mode-winprops result: (t (overlay . #<overlay from 1 to 7030463 in GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf>) (info . Page 1 of 1337.
+) (page . 1))
+:::::} image-mode-window-put result: ((page . 1) (overlay . #<overlay from 1 to 7030463 in GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf>) (info . Page 1 of 1337.
+))
+::::} image-mode-window-put result: ((page . 1) (overlay . #<overlay from 1 to 7030463 in GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf>) (info . Page 1 of 1337.
+))
+::::{ image-mode-window-put args: (info Page 1 of 1337.
+ nil)
+:::::{ image-mode-winprops args: (nil nil)
+:::::} image-mode-winprops result: (#<window 3 on GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf> (page . 1) (overlay . #<overlay from 1 to 7030463 in GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf>) (info . Page 1 of 1337.
+))
+:::::{ image-mode-window-put args: (info Page 1 of 1337.
+ t)
+::::::{ image-mode-winprops args: (t nil)
+::::::} image-mode-winprops result: (t (page . 1) (overlay . #<overlay from 1 to 7030463 in GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf>) (info . Page 1 of 1337.
+))
+:::::} image-mode-window-put result: ((info . Page 1 of 1337.
+) (page . 1) (overlay . #<overlay from 1 to 7030463 in GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf>))
+::::} image-mode-window-put result: ((info . Page 1 of 1337.
+) (page . 1) (overlay . #<overlay from 1 to 7030463 in GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf>))
+::::{ doc-view--current-cache-dir args: nil
+::::} doc-view--current-cache-dir result: /tmp/docview1000/GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf-dce847ffdfa273bf0fc346f8c3c5927a/
+::::{ doc-view-insert-image args: (/tmp/docview1000/GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf-dce847ffdfa273bf0fc346f8c3c5927a/page-1.png (:pointer arrow))
+:::::{ image-mode-window-get args: (overlay nil)
+::::::{ image-mode-winprops args: (nil nil)
+::::::} image-mode-winprops result: (#<window 3 on GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf> (info . Page 1 of 1337.
+) (page . 1) (overlay . #<overlay from 1 to 7030463 in GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf>))
+:::::} image-mode-window-get result: #<overlay from 1 to 7030463 in GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf>
+:::::{ image-mode-window-get args: (slice nil)
+::::::{ image-mode-winprops args: (nil nil)
+::::::} image-mode-winprops result: (#<window 3 on GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf> (info . Page 1 of 1337.
+) (page . 1) (overlay . #<overlay from 1 to 7030463 in GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf>))
+:::::} image-mode-window-get result: nil
+:::::{ image-mode-window-put args: (image (image :type png :file /tmp/docview1000/GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf-dce847ffdfa273bf0fc346f8c3c5927a/page-1.png :scale 1 :pointer arrow :width 850 :transform-smoothing t) nil)
+::::::{ image-mode-winprops args: (nil nil)
+::::::} image-mode-winprops result: (#<window 3 on GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf> (info . Page 1 of 1337.
+) (page . 1) (overlay . #<overlay from 1 to 7030463 in GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf>))
+::::::{ image-mode-window-put args: (image (image :type png :file /tmp/docview1000/GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf-dce847ffdfa273bf0fc346f8c3c5927a/page-1.png :scale 1 :pointer arrow :width 850 :transform-smoothing t) t)
+:::::::{ image-mode-winprops args: (t nil)
+:::::::} image-mode-winprops result: (t (info . Page 1 of 1337.
+) (page . 1) (overlay . #<overlay from 1 to 7030463 in GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf>))
+::::::} image-mode-window-put result: ((image image :type png :file /tmp/docview1000/GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf-dce847ffdfa273bf0fc346f8c3c5927a/page-1.png :scale 1 :pointer arrow :width 850 :transform-smoothing t) (info . Page 1 of 1337.
+) (page . 1) (overlay . #<overlay from 1 to 7030463 in GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf>))
+:::::} image-mode-window-put result: ((image image :type png :file /tmp/docview1000/GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf-dce847ffdfa273bf0fc346f8c3c5927a/page-1.png :scale 1 :pointer arrow :width 850 :transform-smoothing t) (info . Page 1 of 1337.
+) (page . 1) (overlay . #<overlay from 1 to 7030463 in GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf>))
+:::::{ image-mode-window-get args: (hscroll #<window 3 on GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf>)
+::::::{ image-mode-winprops args: (#<window 3 on GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf> nil)
+::::::} image-mode-winprops result: (#<window 3 on GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf> (image image :type png :file /tmp/docview1000/GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf-dce847ffdfa273bf0fc346f8c3c5927a/page-1.png :scale 1 :pointer arrow :width 850 :transform-smoothing t) (info . Page 1 of 1337.
+) (page . 1) (overlay . #<overlay from 1 to 7030463 in GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf>))
+:::::} image-mode-window-get result: nil
+:::::{ image-mode-window-get args: (vscroll #<window 3 on GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf>)
+::::::{ image-mode-winprops args: (#<window 3 on GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf> nil)
+::::::} image-mode-winprops result: (#<window 3 on GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf> (image image :type png :file /tmp/docview1000/GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf-dce847ffdfa273bf0fc346f8c3c5927a/page-1.png :scale 1 :pointer arrow :width 850 :transform-smoothing t) (info . Page 1 of 1337.
+) (page . 1) (overlay . #<overlay from 1 to 7030463 in GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf>))
+:::::} image-mode-window-get result: nil
+::::} doc-view-insert-image result: nil
+::::{ image-mode-window-get args: (overlay nil)
+:::::{ image-mode-winprops args: (nil nil)
+:::::} image-mode-winprops result: (#<window 3 on GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf> (image image :type png :file /tmp/docview1000/GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf-dce847ffdfa273bf0fc346f8c3c5927a/page-1.png :scale 1 :pointer arrow :width 850 :transform-smoothing t) (info . Page 1 of 1337.
+) (page . 1) (overlay . #<overlay from 1 to 7030463 in GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf>))
+::::} image-mode-window-get result: #<overlay from 1 to 7030463 in GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf>
+::::{ image-mode-window-get args: (info nil)
+:::::{ image-mode-winprops args: (nil nil)
+:::::} image-mode-winprops result: (#<window 3 on GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf> (image image :type png :file /tmp/docview1000/GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf-dce847ffdfa273bf0fc346f8c3c5927a/page-1.png :scale 1 :pointer arrow :width 850 :transform-smoothing t) (info . Page 1 of 1337.
+) (page . 1) (overlay . #<overlay from 1 to 7030463 in GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf>))
+::::} image-mode-window-get result: Page 1 of 1337.
+
+:::} doc-view-goto-page result: Page 1 of 1337.
+
+::} doc-view-new-window-function result: Page 1 of 1337.
+
+:} image-mode-winprops result: (#<window 3 on GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf> (image image :type png :file /tmp/docview1000/GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf-dce847ffdfa273bf0fc346f8c3c5927a/page-1.png :scale 1 :pointer arrow :width 850 :transform-smoothing t) (info . Page 1 of 1337.
+) (page . 1) (overlay . #<overlay from 1 to 7030463 in GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf>))
+:{ image-mode-window-get args: (hscroll (#<window 3 on GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf> (image image :type png :file /tmp/docview1000/GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf-dce847ffdfa273bf0fc346f8c3c5927a/page-1.png :scale 1 :pointer arrow :width 850 :transform-smoothing t) (info . Page 1 of 1337.
+) (page . 1) (overlay . #<overlay from 1 to 7030463 in GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf>)))
+:} image-mode-window-get result: nil
+:{ image-mode-window-get args: (vscroll (#<window 3 on GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf> (image image :type png :file /tmp/docview1000/GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf-dce847ffdfa273bf0fc346f8c3c5927a/page-1.png :scale 1 :pointer arrow :width 850 :transform-smoothing t) (info . Page 1 of 1337.
+) (page . 1) (overlay . #<overlay from 1 to 7030463 in GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf>)))
+:} image-mode-window-get result: nil
+:{ image-get-display-property args: nil
+:} image-get-display-property result: (image :type png :file /tmp/docview1000/GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf-dce847ffdfa273bf0fc346f8c3c5927a/page-1.png :scale 1 :pointer arrow :width 850 :transform-smoothing t)
+} image-mode-reapply-winprops result: nil
+{ image-mode-window-get args: (page nil)
+:{ image-mode-winprops args: (nil nil)
+:} image-mode-winprops result: (#<window 3 on GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf> (image image :type png :file /tmp/docview1000/GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf-dce847ffdfa273bf0fc346f8c3c5927a/page-1.png :scale 1 :pointer arrow :width 850 :transform-smoothing t) (info . Page 1 of 1337.
+) (page . 1) (overlay . #<overlay from 1 to 7030463 in GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf>))
+} image-mode-window-get result: 1
+{ doc-view-last-page-number args: nil
+} doc-view-last-page-number result: 1337
+{ image-mode-reapply-winprops args: nil
+:{ image-mode-winprops args: (nil t)
+::{ edebug-anon1613 args: ((#<window 3 on GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf> (image image :type png :file /tmp/docview1000/GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf-dce847ffdfa273bf0fc346f8c3c5927a/page-1.png :scale 1 :pointer arrow :width 850 :transform-smoothing t) (info . Page 1 of 1337.
+) (page . 1) (overlay . #<overlay from 1 to 7030463 in GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf>)))
+::} edebug-anon1613 result: (#<window 3 on GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf> (image image :type png :file /tmp/docview1000/GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf-dce847ffdfa273bf0fc346f8c3c5927a/page-1.png :scale 1 :pointer arrow :width 850 :transform-smoothing t) (info . Page 1 of 1337.
+) (page . 1) (overlay . #<overlay from 1 to 7030463 in GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf>))
+::{ edebug-anon1613 args: ((t (image image :type png :file /tmp/docview1000/GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf-dce847ffdfa273bf0fc346f8c3c5927a/page-1.png :scale 1 :pointer arrow :width 850 :transform-smoothing t) (info . Page 1 of 1337.
+) (page . 1) (overlay . #<overlay from 1 to 7030463 in GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf>)))
+::} edebug-anon1613 result: (t (image image :type png :file /tmp/docview1000/GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf-dce847ffdfa273bf0fc346f8c3c5927a/page-1.png :scale 1 :pointer arrow :width 850 :transform-smoothing t) (info . Page 1 of 1337.
+) (page . 1) (overlay . #<overlay from 1 to 7030463 in GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf>))
+:} image-mode-winprops result: (#<window 3 on GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf> (image image :type png :file /tmp/docview1000/GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf-dce847ffdfa273bf0fc346f8c3c5927a/page-1.png :scale 1 :pointer arrow :width 850 :transform-smoothing t) (info . Page 1 of 1337.
+) (page . 1) (overlay . #<overlay from 1 to 7030463 in GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf>))
+:{ image-mode-window-get args: (hscroll (#<window 3 on GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf> (image image :type png :file /tmp/docview1000/GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf-dce847ffdfa273bf0fc346f8c3c5927a/page-1.png :scale 1 :pointer arrow :width 850 :transform-smoothing t) (info . Page 1 of 1337.
+) (page . 1) (overlay . #<overlay from 1 to 7030463 in GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf>)))
+:} image-mode-window-get result: nil
+:{ image-mode-window-get args: (vscroll (#<window 3 on GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf> (image image :type png :file /tmp/docview1000/GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf-dce847ffdfa273bf0fc346f8c3c5927a/page-1.png :scale 1 :pointer arrow :width 850 :transform-smoothing t) (info . Page 1 of 1337.
+) (page . 1) (overlay . #<overlay from 1 to 7030463 in GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf>)))
+:} image-mode-window-get result: nil
+:{ image-get-display-property args: nil
+:} image-get-display-property result: (image :type png :file /tmp/docview1000/GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf-dce847ffdfa273bf0fc346f8c3c5927a/page-1.png :scale 1 :pointer arrow :width 850 :transform-smoothing t)
+} image-mode-reapply-winprops result: nil
+{ image-mode-window-get args: (page nil)
+:{ image-mode-winprops args: (nil nil)
+:} image-mode-winprops result: (#<window 3 on GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf> (image image :type png :file /tmp/docview1000/GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf-dce847ffdfa273bf0fc346f8c3c5927a/page-1.png :scale 1 :pointer arrow :width 850 :transform-smoothing t) (info . Page 1 of 1337.
+) (page . 1) (overlay . #<overlay from 1 to 7030463 in GNU Emacs Lisp Reference Manual_ For Emacs - Bil Lewis.pdf>))
+} image-mode-window-get result: 1
+{ doc-view-last-page-number args: nil
+} doc-view-last-page-number result: 1337
+#+end_example
+@@html:</details>@@
+
+When we dissect the =doc-view-mode= function, for most forms it seems
+quite straightforward to infer its functionality. The lesser
+straightforward forms are the ones that involve the display
+functionalities. Relevant for the display functionalities are:
+#+begin_src emacs-lisp :tangle yes
+  (add-hook 'image-mode-new-window-functions
+            #'doc-view-new-window-function nil t)
+#+end_src
+#+begin_src emacs-lisp :tangle yes
+  (image-mode-setup-winprops)
+#+end_src
+#+begin_src emacs-lisp
+  (doc-view-initiate-display)
+#+end_src
+
+* License from default Emacs README
+
+NOTE ON COPYRIGHT YEARS
+
+In copyright notices where the copyright holder is the Free Software
+Foundation, then where a range of years appears, this is an inclusive
+range that applies to every year in the range.  For example: 2005-2008
+represents the years 2005, 2006, 2007, and 2008.
+
+
+This file is part of GNU Emacs.
+
+GNU Emacs is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+GNU Emacs is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with GNU Emacs.  If not, see <https://www.gnu.org/licenses/>.
