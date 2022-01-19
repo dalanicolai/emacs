@@ -141,6 +141,7 @@
 (require 'cl-lib)
 (require 'dired)
 (require 'image-mode)
+(require 'book-mode)
 (require 'jka-compr)
 (eval-when-compile (require 'subr-x))
 
@@ -323,6 +324,10 @@ of the page moves to the previous page."
   :type 'boolean
   :version "23.2")
 
+(defcustom doc-view-full-continuous nil
+  "When non-nil scroll pages continuously like a book roll."
+  :type 'boolean)
+
 ;;;; Internal Variables
 
 (defvar-local doc-view--current-converter-processes nil
@@ -332,13 +337,14 @@ of the page moves to the previous page."
   ;; (message "New window %s for buf %s" (car winprops) (current-buffer))
   (cl-assert (or (eq t (car winprops))
                  (eq (window-buffer (car winprops)) (current-buffer))))
+  (setq contents-end-pos (point-max))
   (let ((ol (image-mode-window-get 'overlay winprops)))
     (if ol
         (progn
           (setq ol (copy-overlay ol))
           ;; `ol' might actually be dead.
-          (move-overlay ol (point-min) (point-max)))
-      (setq ol (make-overlay (point-min) (point-max) nil t))
+          (move-overlay ol (point-min) contents-end-pos))
+      (setq ol (make-overlay (point-min) contents-end-pos nil t))
       (overlay-put ol 'doc-view t))
     (overlay-put ol 'window (car winprops))
     (unless (windowp (car winprops))
@@ -348,8 +354,14 @@ of the page moves to the previous page."
       (delete-overlay ol))
     (image-mode-window-put 'overlay ol winprops)
     (when (and (windowp (car winprops))
-               (stringp (overlay-get ol 'display))
+               (or (stringp (overlay-get ol 'display)) (overlay-get ol 'invisible))
                (null doc-view--current-converter-processes))
+      (when doc-view-full-continuous
+        (setq image-sizes (doc-view-normalize-page-sizes (doc-view-page-sizes)))
+        (setq image-positions (book-image-positions image-sizes))
+        (let ((inhibit-read-only t))
+          (book-create-overlays-list)
+          (book-create-placeholders)))
       ;; We're not displaying an image yet, so let's do so.  This happens when
       ;; the buffer is displayed for the first time.
       ;; Don't do it if there's a conversion is running, since in that case, it
@@ -589,6 +601,11 @@ Typically \"page-%s.png\".")
 (defun doc-view-last-page-number ()
   (length doc-view--current-files))
 
+(defun doc-view-page-file-name (page)
+  (expand-file-name
+   (format doc-view--image-file-pattern page)
+   (doc-view--current-cache-dir)))
+
 (defun doc-view-goto-page (page)
   "View the page given by PAGE."
   (interactive "nPage: ")
@@ -623,27 +640,34 @@ Typically \"page-%s.png\".")
     ;; We used to find the file name from doc-view--current-files but
     ;; that's not right if the pages are not generated sequentially
     ;; or if the page isn't in doc-view--current-files yet.
-    (let ((file (expand-file-name
-                 (format doc-view--image-file-pattern page)
-                 (doc-view--current-cache-dir))))
-      (doc-view-insert-image file :pointer 'arrow)
-      (when (and (not (file-exists-p file))
-                 doc-view--current-converter-processes)
-        ;; The PNG file hasn't been generated yet.
-        (funcall doc-view-single-page-converter-function
-                 doc-view--buffer-file-name file page
-                 (let ((win (selected-window)))
-                   (lambda ()
-                     (and (eq (current-buffer) (window-buffer win))
-                          ;; If we changed page in the mean
-                          ;; time, don't mess things up.
-                          (eq (doc-view-current-page win) page)
-                          ;; Make sure we don't infloop.
-                          (file-readable-p file)
-                          (with-selected-window win
-                            (doc-view-goto-page page))))))))
-    (overlay-put (doc-view-current-overlay)
-                 'help-echo (doc-view-current-info))))
+    (let* ((display-pages (if doc-view-full-continuous
+                              (pcase page
+                                (1 '(1 2))
+                                ((pred (= number-of-pages)) (list page (- page 1)))
+                                (p (list (- p 1) p (+ p 1))))
+                            (list page))))
+      (dolist (page display-pages)
+        (let ((file (doc-view-page-file-name page)))
+          (doc-view-insert-image file page :pointer 'arrow)
+          (when (and (not (file-exists-p file))
+                     doc-view--current-converter-processes)
+            ;; The PNG file hasn't been generated yet.
+            (funcall doc-view-single-page-converter-function
+                     doc-view--buffer-file-name file page
+                     (let ((win (selected-window)))
+                       (lambda ()
+                         (and (eq (current-buffer) (window-buffer win))
+                              ;; If we changed page in the mean
+                              ;; time, don't mess things up.
+                              (eq (doc-view-current-page win) page)
+                              ;; Make sure we don't infloop.
+                              (file-readable-p file)
+                              (with-selected-window win
+                                (doc-view-goto-page page)))))))))
+      (overlay-put (doc-view-current-overlay)
+                   'help-echo (doc-view-current-info))
+      (when (and doc-view-full-continuous image-positions)
+        (book-scroll-to-page page)))))
 
 (defun doc-view-next-page (&optional arg)
   "Browse ARG pages forward."
@@ -837,6 +861,7 @@ OpenDocument format)."
           (setq-local doc-view-image-width new)
           (doc-view-insert-image
            (plist-get (cdr (doc-view-current-image)) :file)
+           (doc-view-current-page)
            :width doc-view-image-width)))
     (let ((new (ceiling (* factor doc-view-resolution))))
       (unless (equal new doc-view-resolution)
@@ -856,6 +881,7 @@ OpenDocument format)."
         (kill-local-variable 'doc-view-image-width)
         (doc-view-insert-image
          (plist-get (cdr (doc-view-current-image)) :file)
+         nil
          :width doc-view-image-width))
     (kill-local-variable 'doc-view-resolution)
     (doc-view-reconvert-doc)))
@@ -1481,7 +1507,43 @@ After calling this function whole pages will be visible again."
 
 ;;;; Display
 
-(defun doc-view-insert-image (file &rest args)
+(defun doc-view-page-sizes ()
+  (let ((file doc-view--buffer-file-name)
+        pages
+        page-sizes)
+    (pcase doc-view-doc-type
+      ((or 'pdf 'epub) (cond ((executable-find "mutool")
+                              (with-temp-buffer
+                                (call-process "mutool" nil t nil "info" "-M" file)
+                                (buffer-string)
+                                (goto-char (point-min))
+                                (search-forward-regexp "^Pages: \\([0-9]*\\)")
+                                (setq pages (string-to-number (match-string 1)))
+                                (search-forward-regexp "\\[ 0 0 \\([0-9]*\\).* \\([0-9]*\\).* \\]")
+                                (let ((page-size (cons (string-to-number (match-string 1))
+                                                       (string-to-number (match-string 2)))))
+                                  (setq page-sizes (make-list pages page-size))))
+                              ;; TODO add alternative using `pdfinfo -box'
+                              )))
+      ('djvu (let* ((pages-info (mapcar (lambda (l)
+                                          (split-string l "[ =]"))
+                                        (process-lines "djvused" "-e" "'size'" file))))
+               (setq page-sizes (mapcar (lambda (dims)
+                                          (let ((w (string-to-number (nth 1 dims)))
+                                                (h (string-to-number (nth 3 dims))))
+                                            (cons w h)))
+                                        pages-info))
+               (setq pages (length page-sizes)))))
+    ;; (cons pages page-sizes)))
+    page-sizes))
+
+(defun doc-view-normalize-page-sizes (sizes-list)
+  (mapcar (lambda (s)
+            (let ((factor (/ (float doc-view-image-width) (car s))))
+              (cons (round (* factor (car s))) (round (* factor (cdr s))))))
+          sizes-list))
+
+(defun doc-view-insert-image (file page &rest args)
   "Insert the given png FILE.
 ARGS is a list of image descriptors."
   (when doc-view--pending-cache-flush
@@ -1507,30 +1569,48 @@ ARGS is a list of image descriptors."
                                     img-width))
              (window-width (window-width)))
         (setf (doc-view-current-image) image)
-        (move-overlay ol (point-min) (point-max))
-        ;; In case the window is wider than the image, center the image
-        ;; horizontally.
-        (overlay-put ol 'before-string
-                     (when (and image (> window-width displayed-img-width))
-                       (propertize " " 'display
-                                   `(space :align-to (+ center (-0.5 . ,displayed-img-width))))))
-        (overlay-put ol 'display
-                     (cond
-                      (image
-                       (if slice
-                           (list (cons 'slice slice) image)
-                         image))
-                      ;; We're trying to display a page that doesn't exist.
-                      (doc-view--current-converter-processes
-                       ;; Maybe the page doesn't exist *yet*.
-                       "Cannot display this page (yet)!")
-                      (t
-                       ;; Typically happens if the conversion process somehow
-                       ;; failed.  Better not signal an error here because it
-                       ;; could prevent a subsequent reconversion from fixing
-                       ;; the problem.
-                       (concat "Cannot display this page!\n"
-                               "Maybe because of a conversion failure!"))))
+        (if doc-view-full-continuous
+            (overlay-put (nth (1- page) overlays-list) 'display
+                         (cond
+                          (image
+                           (if slice
+                               (list (cons 'slice slice) image)
+                             image))
+                          ;; We're trying to display a page that doesn't exist.
+                          (doc-view--current-converter-processes
+                           ;; Maybe the page doesn't exist *yet*.
+                           "Cannot display this page (yet)!")
+                          (t
+                           ;; Typically happens if the conversion process somehow
+                           ;; failed.  Better not signal an error here because it
+                           ;; could prevent a subsequent reconversion from fixing
+                           ;; the problem.
+                           (concat "Cannot display this page!\n"
+                                   "Maybe because of a conversion failure!"))))
+          (move-overlay ol (point-min) (point-max))
+          ;; In case the window is wider than the image, center the image
+          ;; horizontally.
+          (overlay-put ol 'before-string
+                       (when (and image (> window-width displayed-img-width))
+                         (propertize " " 'display
+                                     `(space :align-to (+ center (-0.5 . ,displayed-img-width))))))
+          (overlay-put ol 'display
+                       (cond
+                        (image
+                         (if slice
+                             (list (cons 'slice slice) image)
+                           image))
+                        ;; We're trying to display a page that doesn't exist.
+                        (doc-view--current-converter-processes
+                         ;; Maybe the page doesn't exist *yet*.
+                         "Cannot display this page (yet)!")
+                        (t
+                         ;; Typically happens if the conversion process somehow
+                         ;; failed.  Better not signal an error here because it
+                         ;; could prevent a subsequent reconversion from fixing
+                         ;; the problem.
+                         (concat "Cannot display this page!\n"
+                                 "Maybe because of a conversion failure!")))))
         (let ((win (overlay-get ol 'window)))
           (if (stringp (overlay-get ol 'display))
               (progn            ;Make sure the text is not scrolled out of view.
@@ -1583,10 +1663,12 @@ have the page we want to view."
   ;; case it's better to keep displaying the "stale" page while computing
   ;; the fresh new ones).
   (unless (overlay-get (doc-view-current-overlay) 'display)
-    (overlay-put (doc-view-current-overlay) 'display
-                 (concat (propertize "Welcome to DocView!" 'face 'bold)
-                         "\n"
-                         (substitute-command-keys "
+    (if doc-view-full-continuous
+        (overlay-put (doc-view-current-overlay) 'invisible t)
+      (overlay-put (doc-view-current-overlay) 'display
+                   (concat (propertize "Welcome to DocView!" 'face 'bold)
+                           "\n"
+                           (substitute-command-keys "
 If you see this buffer it means that the document you want to view is being
 converted to PNG and the conversion of the first page hasn't finished yet or
 `doc-view-conversion-refresh-interval' is set to nil.
@@ -1595,7 +1677,7 @@ For now these keys are useful:
 \\<doc-view-mode-map>
 \\[quit-window] : Bury this buffer.  Conversion will go on in background.
 \\[image-kill-buffer] : Kill the conversion process and this buffer.
-\\[doc-view-kill-proc] : Kill the conversion process.\n")))))
+\\[doc-view-kill-proc] : Kill the conversion process.\n"))))))
 
 (declare-function tooltip-show "tooltip" (text &optional use-echo-area))
 
