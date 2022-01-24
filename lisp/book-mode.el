@@ -80,11 +80,12 @@ Pass non-nil value for include-first when the buffer text starts with a match."
   ;; first overlay starts at 1
   (setq contents-end-pos (goto-char (point-max)))
   (let(overlays)
-    (insert "1")
+    (insert " ")
     (push (make-overlay (1- (point)) (point)) overlays)
     (setq overlays-list (dotimes (p (1- (length image-sizes)) (nreverse overlays))
                           (insert "\n")
-                          (insert (number-to-string (+ p 2)))
+                          ;; (insert (number-to-string (+ p 2)))
+                          (insert " ")
                           (push (make-overlay (1- (point)) (point)) overlays))))
   (goto-char (point-min)))
 
