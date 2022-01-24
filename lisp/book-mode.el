@@ -68,10 +68,10 @@
 
 (defun book-image-positions (image-sizes)
   (let ((sum 0)
-        positions)
+        (positions (list 0)))
     (dolist (s image-sizes)
-      (push sum positions)
-      (setq sum (+ sum (cdr s))))
+      (setq sum (+ sum (cdr s)))
+      (push sum positions))
     (nreverse positions)))
 
 (defun book-create-overlays-list ()
