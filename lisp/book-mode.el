@@ -2,6 +2,7 @@
 
 (require 'image-mode)
 (require 'svg)
+(require 'cl-lib)
 
 ;; TODO remove test code
 (dotimes (i 3)
@@ -38,7 +39,7 @@
 (defgroup book-mode nil
   "Bookroll sutomizations.")
 
-(defcustom book-scroll-fraction 16
+(defcustom book-scroll-fraction 32
   "Set the scroll step size in 1/fraction of page.")
 
 (defvar-local overlays-list nil)
@@ -102,10 +103,72 @@ Pass non-nil value for include-first when the buffer text starts with a match."
       ;; (let ((p (1+ i)));; shift by 1 to match with page numbers
       (overlay-put (nth i overlays-list) 'display (or ph (book-create-empty-page (nth i image-sizes)))))))
 
+(defun book-image-size (&optional page)
+  (nth (- (or page (book-current-page)) 1) image-sizes))
+
+(defun book-current-page ()
+  (interactive)
+  (let ((i 0)
+        (cur-pos (window-vscroll nil t)))
+    (while (<= (nth (1+ i) image-positions) (+ cur-pos (/ (window-pixel-height) 2)))
+      (setq i (1+ i)))
+    (1+ i)))
+
+(defun book-page-triplet (page)
+  (pcase (doc-view-last-page-number)
+    (1 '(1))
+    (2 '(1 2))
+    (_ (pcase page
+         (1 '(1 2))
+         ((pred (= number-of-pages)) (list page (- page 1)))
+         (p (list (- p 1) p (+ p 1)))))))
+
 (defun book-scroll-to-page (page)
   (interactive "n")
-  ;; (br-update-page-triplet page)
+  ;; (book-update-page-triplet page)
   (let* ((elt (1- page)))
     (set-window-vscroll nil (nth elt image-positions) t)))
+
+(defun book-scroll-up ()
+  ;; (defun pdf-view-next-line-or-next-page ()
+  (interactive)
+  ;; because pages could have different heights, we calculate the step size on each scroll
+  ;; TODO define constant scroll size if doc has single page height
+  (let* ((scroll-step-size (/ (cdr (book-image-size)) book-scroll-fraction))
+         (page-end (nth (doc-view-current-page) image-positions))
+         (new-vscroll (image-set-window-vscroll (+ (window-vscroll nil t) scroll-step-size))))
+    (when (> (+ new-vscroll (/ (window-pixel-height) 2)) page-end)
+      (cl-incf (doc-view-current-page))
+      (dolist (p (book-page-triplet (doc-view-current-page)))
+        (doc-view-insert-image (doc-view-page-file-name p)
+                               p
+                               :width doc-view-image-width
+                               :pointer 'arrow
+                               :relief 4))))
+                               ;; :ascent (if doc-view-full-continuous 0 50)))))
+  (sit-for 0))
+
+(defun book-scroll-down ()
+  ;; (defun pdf-view-next-line-or-next-page ()
+  (interactive)
+  ;; because pages could have different heights, we calculate the step size on each scroll
+  ;; TODO define constant scroll size if doc has single page height
+  (let* ((scroll-step-size (/ (cdr (book-image-size)) book-scroll-fraction))
+         (page-beg (nth (1- (doc-view-current-page)) image-positions))
+         (new-vscroll (image-set-window-vscroll (- (window-vscroll nil t) scroll-step-size))))
+    (when (< (+ new-vscroll (/ (window-pixel-height) 2)) page-beg)
+      (cl-decf (doc-view-current-page))
+      (dolist (p (book-page-triplet (doc-view-current-page)))
+        (doc-view-insert-image (doc-view-page-file-name p)
+                               p
+                               :width doc-view-image-width
+                               :pointer 'arrow
+                               :relief 4))))
+                               ;; :ascent (if doc-view-full-continuous 100 50)))))
+  (sit-for 0))
+
+(when (boundp 'evil-version)
+  (evil-define-key 'evilified doc-view-mode-map "j" 'book-scroll-up)
+  (evil-define-key 'evilified doc-view-mode-map "k" 'book-scroll-down))
 
 (provide 'book-mode)
