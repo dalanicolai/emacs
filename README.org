@@ -10,9 +10,10 @@ The code in the doc-view package (and even more pdf-tools) is not
 trivial. In order to understand the code, we keep notes here where we
 describe or map out the working mechanism behind the package.
 
-Here is an edebug trace for opening a document, where we have left out
-the calls to some none essential functions (divided over two example
-blocks so that we can fold them separately):
+Here is an edebug trace for opening a document (that has already been
+fully converted), where we have left out the calls to some none
+essential functions (divided over two example blocks so that we can
+fold them separately):
 
 #+begin_example
 { doc-view-mode args: nil
@@ -280,6 +281,35 @@ functionalities. Relevant for the display functionalities are:
 #+begin_src emacs-lisp
   (doc-view-initiate-display)
 #+end_src
+The first form simply adds a function to the
+=image-mode-new-window-functions= which gets triggered from the
+=image-mode-winprops= function.
+
+The second form, sets the =image-mode-winprops-alist= to nil and adds
+=image-mode-reapply-winprops= tot the
+=window-configuration-change-hook=. This functions simply restores the
+'vscroll and 'hscroll after a window configuration change.
+
+The third form triggers the displaying. The display mechanism is
+rather elaborate, so we will dissect it in here.
+
+** Display mechanism
+The =doc-view-initiate-display= function starts with calling
+=doc-view-buffer-message=. Despite the simple name (and purpose) of
+the function, the function has a noteworthy side-effects:
+- because it calls =image-mode-window-get= (through
+  =doc-view-current-overlay=), it calls =image-mode-winprops=, which
+  first sets =winprops= anf =image-mode-winprops-alist= to ~(t)~ and
+  ((t)) and then triggers =doc-view-new-window-function= (by running
+  the hook).
+- the =doc-view-new-window-function= creates an overlay over the
+  entire content and adds the properties ~'doc-view t~, ~'window (car
+  winprops)~ (which is t the first time), but then when called for the
+  first time, it again deletes the overlay. Finally it adds it to the
+  winprops. (When the car of winprops is not t, has a string overlay
+  property, and the =doc-view--current-converter-processes= is nil,
+  then it also jumps to the 'current' page.
+
 
 * License from default Emacs README
 
