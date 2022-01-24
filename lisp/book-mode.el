@@ -1,3 +1,5 @@
+;; -*- lexical-binding: t; -*-
+
 (require 'image-mode)
 (require 'svg)
 
