@@ -69,7 +69,11 @@
 ;; (defalias 'book-mode-reapply-winprops 'image-mode-reapply-winprops)
 ;; (defalias 'book-mode-setup-winprops 'image-mode-setup-winprops)
 
-(defun book-image-positions (image-sizes)
+(defmacro book-current-overlays () '(image-mode-window-get 'overlays))
+(defmacro book-image-sizes () '(image-mode-window-get 'image-sizes))
+(defmacro book-image-positions () '(image-mode-window-get 'image-positions))
+
+(defun book-create-image-positions (image-sizes)
   (let ((sum 0)
         (positions (list 0)))
     (dolist (s image-sizes)
@@ -77,19 +81,21 @@
       (push sum positions))
     (nreverse positions)))
 
-(defun book-create-overlays-list ()
+(defun book-create-overlays-list (winprops)
   "Create list of overlays spread out over the buffer contents.
 Pass non-nil value for include-first when the buffer text starts with a match."
   ;; first overlay starts at 1
   (setq contents-end-pos (goto-char (point-max)))
-  (let(overlays)
+  (let (overlays)
     (insert " ")
     (push (make-overlay (1- (point)) (point)) overlays)
-    (setq overlays-list (dotimes (p (1- (length image-sizes)) (nreverse overlays))
+    (let ((overlays-list (dotimes (p (1- (length image-sizes)) (nreverse overlays))
                           (insert "\n")
                           ;; (insert (number-to-string (+ p 2)))
                           (insert " ")
                           (push (make-overlay (1- (point)) (point)) overlays))))
+      (mapcar (lambda (o) (overlay-put o 'window (get-buffer-window))) overlays-list)
+      (image-mode-window-put 'overlays overlays-list winprops)))
   (goto-char (point-min)))
 
 (defun book-create-empty-page (size)
@@ -101,16 +107,17 @@ Pass non-nil value for include-first when the buffer text starts with a match."
          (ph (when constant-size (book-create-empty-page (car image-sizes)))))
     (dotimes (i (length image-sizes))
       ;; (let ((p (1+ i)));; shift by 1 to match with page numbers
-      (overlay-put (nth i overlays-list) 'display (or ph (book-create-empty-page (nth i image-sizes)))))))
+      ;; (overlay-put (nth i overlays-list) 'display (or ph (book-create-empty-page (nth i image-sizes)))))))
+      (overlay-put (nth i (book-current-overlays)) 'display (or ph (book-create-empty-page (nth i image-sizes)))))))
 
 (defun book-image-size (&optional page)
-  (nth (- (or page (book-current-page)) 1) image-sizes))
+  (nth (- (or page (doc-view-current-page)) 1) (book-image-sizes)))
 
 (defun book-current-page ()
   (interactive)
   (let ((i 0)
         (cur-pos (window-vscroll nil t)))
-    (while (<= (nth (1+ i) image-positions) (+ cur-pos (/ (window-pixel-height) 2)))
+    (while (<= (nth (1+ i) (book-image-positions)) (+ cur-pos (/ (window-pixel-height) 2)))
       (setq i (1+ i)))
     (1+ i)))
 
@@ -127,7 +134,7 @@ Pass non-nil value for include-first when the buffer text starts with a match."
   (interactive "n")
   ;; (book-update-page-triplet page)
   (let* ((elt (1- page)))
-    (set-window-vscroll nil (nth elt image-positions) t)))
+    (set-window-vscroll nil (nth elt (book-image-positions)) t)))
 
 (defun book-scroll-up ()
   ;; (defun pdf-view-next-line-or-next-page ()
@@ -135,7 +142,7 @@ Pass non-nil value for include-first when the buffer text starts with a match."
   ;; because pages could have different heights, we calculate the step size on each scroll
   ;; TODO define constant scroll size if doc has single page height
   (let* ((scroll-step-size (/ (cdr (book-image-size)) book-scroll-fraction))
-         (page-end (nth (doc-view-current-page) image-positions))
+         (page-end (nth (doc-view-current-page) (book-image-positions)))
          (new-vscroll (image-set-window-vscroll (+ (window-vscroll nil t) scroll-step-size))))
     (when (> (+ new-vscroll (/ (window-pixel-height) 2)) page-end)
       (cl-incf (doc-view-current-page))
@@ -154,7 +161,7 @@ Pass non-nil value for include-first when the buffer text starts with a match."
   ;; because pages could have different heights, we calculate the step size on each scroll
   ;; TODO define constant scroll size if doc has single page height
   (let* ((scroll-step-size (/ (cdr (book-image-size)) book-scroll-fraction))
-         (page-beg (nth (1- (doc-view-current-page)) image-positions))
+         (page-beg (nth (1- (doc-view-current-page)) (book-image-positions)))
          (new-vscroll (image-set-window-vscroll (- (window-vscroll nil t) scroll-step-size))))
     (when (< (+ new-vscroll (/ (window-pixel-height) 2)) page-beg)
       (cl-decf (doc-view-current-page))

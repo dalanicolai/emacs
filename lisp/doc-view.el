@@ -356,11 +356,15 @@ of the page moves to the previous page."
     (when (and (windowp (car winprops))
                (or (stringp (overlay-get ol 'display)) (overlay-get ol 'invisible)))
       (when doc-view-full-continuous
-        (setq image-sizes (doc-view-normalize-page-sizes (doc-view-page-sizes)))
-        (setq image-positions (book-image-positions image-sizes))
+        (let* ((image-sizes (doc-view-normalize-page-sizes (doc-view-page-sizes)))
+               (image-positions (book-create-image-positions image-sizes)))
+        ;; (setq image-sizes (doc-view-normalize-page-sizes (doc-view-page-sizes)))
+        ;; (setq image-positions (book-create-image-positions image-sizes))
+        (image-mode-window-put 'image-sizes image-sizes winprops)
+        (image-mode-window-put 'image-positions image-positions winprops)
         (let ((inhibit-read-only t))
-          (book-create-overlays-list)
-          (book-create-placeholders)))
+          (book-create-overlays-list winprops)
+          (book-create-placeholders))))
       (when (null doc-view--current-converter-processes)
         ;; We're not displaying an image yet, so let's do so.  This happens when
         ;; the buffer is displayed for the first time.
@@ -595,8 +599,11 @@ Typically \"page-%s.png\".")
   `(image-mode-window-get 'page ,win))
 (defmacro doc-view-current-info () '(image-mode-window-get 'info))
 (defmacro doc-view-current-overlay () '(image-mode-window-get 'overlay))
+;; (defmacro doc-view-current-overlays () '(image-mode-window-get 'overlays))
 (defmacro doc-view-current-image () '(image-mode-window-get 'image))
 (defmacro doc-view-current-slice () '(image-mode-window-get 'slice))
+;; (defmacro doc-view-image-sizes () '(image-mode-window-get 'image-sizes))
+;; (defmacro doc-view-image-positions () '(image-mode-window-get 'image-positions))
 
 (defun doc-view-last-page-number ()
   (length doc-view--current-files))
@@ -653,7 +660,8 @@ Typically \"page-%s.png\".")
                                  ;; although I do not understand the decription
                                  ;; of ascent in the elisp manual, it
                                  ;; turn out to be useful here
-                                 :ascent (if doc-view-full-continuous 100 50))
+                                 ;; :ascent (if doc-view-full-continuous 100 50))
+                                 :relief 4)
           (when (and (not (file-exists-p file))
                      doc-view--current-converter-processes)
             ;; The PNG file hasn't been generated yet.
@@ -671,7 +679,7 @@ Typically \"page-%s.png\".")
                                 (doc-view-goto-page page)))))))))
       (overlay-put (doc-view-current-overlay)
                    'help-echo (doc-view-current-info))
-      (when (and doc-view-full-continuous image-positions)
+      (when (and doc-view-full-continuous (book-image-positions))
         (book-scroll-to-page page)))))
 
 (defun doc-view-next-page (&optional arg)
@@ -867,6 +875,11 @@ OpenDocument format)."
   (if doc-view-scale-internally
       (let ((new (ceiling (* factor doc-view-image-width))))
         (unless (equal new doc-view-image-width)
+          (let* ((image-sizes (doc-view-normalize-page-sizes (doc-view-page-sizes) new))
+                 (image-positions (book-create-image-positions image-sizes)))
+            (image-mode-window-put 'image-sizes image-sizes (image-mode-winprops))
+            (image-mode-window-put 'image-positions image-positions (image-mode-winprops))
+            (book-create-placeholders))
           (setq-local doc-view-image-width new)
           (doc-view-insert-image
            (plist-get (cdr (doc-view-current-image)) :file)
@@ -1554,9 +1567,9 @@ After calling this function whole pages will be visible again."
     ;; (cons pages page-sizes)))
     page-sizes))
 
-(defun doc-view-normalize-page-sizes (sizes-list)
+(defun doc-view-normalize-page-sizes (sizes-list &optional width)
   (mapcar (lambda (s)
-            (let ((factor (/ (float doc-view-image-width) (car s))))
+            (let ((factor (/ (float (or width doc-view-image-width)) (car s))))
               (cons (round (* factor (car s))) (round (* factor (cdr s))))))
           sizes-list))
 
@@ -1589,8 +1602,10 @@ ARGS is a list of image descriptors."
         (image-size image t)
         (setf (doc-view-current-image) image)
         (if doc-view-full-continuous
-            (when overlays-list
-              (overlay-put (nth (1- page) overlays-list) 'display
+            (when (or (and (= (length (book-current-overlays)) 1)
+                           (= page 1))
+                      (> (length (book-current-overlays)) 1))
+              (overlay-put (nth (1- page) (book-current-overlays)) 'display
                            (cond
                             (image
                              (if slice
