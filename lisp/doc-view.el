@@ -1,4 +1,4 @@
-;;; doc-view.el --- Document viewer for Emacs -*- lexical-binding: t -*-
+;doc-view.el --- Document viewer for Emacs -*- lexical-binding: t -*-
 
 ;; Copyright (C) 2007-2022 Free Software Foundation, Inc.
 ;;
@@ -144,7 +144,9 @@
 (require 'dired)
 (require 'image-mode)
 (require 'jka-compr)
-(eval-when-compile (require 'subr-x))
+(eval-when-compile
+  (require 'subr-x)
+  (require 'image-roll))
 
 ;;;; Customization Options
 
@@ -1524,41 +1526,132 @@ After calling this function whole pages will be visible again."
   ;; Redisplay
   (doc-view-goto-page (doc-view-current-page)))
 
+;;;; Continuous scroll minor mode (using image-roll.el)
+
+(define-minor-mode doc-view-roll-minor-mode
+  "If enabled display document on a virtual scroll providing
+continuous scrolling."
+  :lighter " Continuous"
+  :keymap `((,(kbd "<down>") . image-roll-scroll-forward)
+            (,(kbd "<up>") . image-roll-scroll-backward)
+            (,(kbd "<next>") . image-roll-next-page)
+            (,(kbd "<prior>") . image-roll-previous-page)
+            (,(kbd "S-<next>") . image-roll-scroll-screen-forward)
+            (,(kbd "S-<prior>") . image-roll-scroll-screen-backward))
+  :version 28.1
+
+  (setq-local doc-view-scale-internally nil
+              image-roll-center t)
+
+  (setq-local image-roll-last-page (doc-view-last-page-number)
+              image-roll-display-page-function 'doc-view-insert-image
+              image-roll-page-sizes-function 'doc-view-desired-page-sizes
+              image-roll-center t)
+
+  ;; (unless (doc-view-already-converted-p)
+  ;;   (user-error "Document conversion not finished yet"))
+  (add-hook 'window-configuration-change-hook 'image-roll--redisplay nil t)
+
+  (remove-hook 'image-mode-new-window-functions
+	    #'doc-view-new-window-function t)
+  (add-hook 'window-configuration-change-hook 'image-roll--redisplay nil t)
+  (add-hook 'image-mode-new-window-functions 'image-roll--new-window-function nil t)
+  (unless (listp image-mode-winprops-alist)
+    (setq image-mode-winprops-alist nil))
+
+  (let ((inhibit-read-only t))
+    (erase-buffer)
+    (image-roll--new-window-function (list (selected-window))))
+  (image-roll--redisplay))
+
 ;;;; Display
+
+(defun doc-view-desired-page-size (page &optional args)
+  ;; Function only uses for image-roll minor mode. Taken from
+  ;; doc-view-goto-page and doc-view-insert-image.
+  (let* ((file (expand-file-name
+                (format doc-view--image-file-pattern page)
+                (doc-view--current-cache-dir)))
+         (image (if (and file (file-readable-p file))
+			              (if (not doc-view-scale-internally)
+			                  (apply #'create-image file doc-view--image-type nil args)
+			                (unless (member :width args)
+			                  (setq args `(,@args :width ,doc-view-image-width)))
+                      (unless (member :transform-smoothing args)
+                        (setq args `(,@args :transform-smoothing t)))
+			                (apply #'create-image file doc-view--image-type nil args))))
+	       (slice (doc-view-current-slice))
+               (size (image-size image t))
+               (aspect-ratio (/ (float (cdr size)) (car size)))
+	       (img-width (and image (car size)))
+	       (displayed-img-width (if (and image slice)
+				                          (* (/ (float (nth 2 slice))
+					                              (car (image-size image 'pixels)))
+					                           img-width)
+				                        img-width))
+               (scaling-factor (/ (float doc-view-image-width) displayed-img-width))
+               (width (* scaling-factor displayed-img-width)))
+    (cons width
+          (* aspect-ratio width))))
+
+(defun doc-view-desired-page-sizes ()
+  ;; Function only uses for image-roll minor mode
+  (let (page-sizes)
+    (dotimes (i (doc-view-last-page-number))
+      (push (doc-view-desired-page-size (1+ i))
+            page-sizes))
+    (nreverse page-sizes)))
 
 (defun doc-view-insert-image (file &rest args)
   "Insert the given png FILE.
-ARGS is a list of image descriptors."
+When `doc-view-roll-minor-mode' is non-nil, FILE
+should be a page number. ARGS is a list of image descriptors."
   (when doc-view--pending-cache-flush
     (clear-image-cache)
     (setq doc-view--pending-cache-flush nil))
-  (let ((ol (doc-view-current-overlay)))
+  (let* ((ol (if doc-view-roll-minor-mode
+                 (image-roll-page-overlay file)
+               (doc-view-current-overlay))))
+    (when doc-view-roll-minor-mode
+      (setq file (expand-file-name
+                  (format doc-view--image-file-pattern file)
+                  (doc-view--current-cache-dir))))
     ;; Only insert the image if the buffer is visible.
     (when (window-live-p (overlay-get ol 'window))
       (let* ((image (if (and file (file-readable-p file))
 			(if (not doc-view-scale-internally)
-			    (apply #'create-image file doc-view--image-type nil args)
+			    (apply #'create-image file doc-view--image-type nil
+                                   (append args (when doc-view-roll-minor-mode
+                                                  (list :margin (cons 0 image-roll-vertical-margin)))))
 			  (unless (member :width args)
 			    (setq args `(,@args :width ,doc-view-image-width)))
                           (unless (member :transform-smoothing args)
                             (setq args `(,@args :transform-smoothing t)))
 			  (apply #'create-image file doc-view--image-type nil args))))
 	     (slice (doc-view-current-slice))
-	     (img-width (and image (car (image-size image))))
+	     (img-width (and image (car (image-size image
+                                                    (when doc-view-roll-minor-mode
+                                                      t)))))
 	     (displayed-img-width (if (and image slice)
 				      (* (/ (float (nth 2 slice))
 					    (car (image-size image 'pixels)))
 					 img-width)
 				    img-width))
-	     (window-width (window-width)))
+	     (window-width (if doc-view-roll-minor-mode
+                               (window-pixel-width)
+                             (window-width))))
 	(setf (doc-view-current-image) image)
-	(move-overlay ol (point-min) (point-max))
+	(unless doc-view-roll-minor-mode
+          (move-overlay ol (point-min) (point-max)))
 	;; In case the window is wider than the image, center the image
 	;; horizontally.
-	(overlay-put ol 'before-string
-		     (when (and image (> window-width displayed-img-width))
-		       (propertize " " 'display
-				   `(space :align-to (+ center (-0.5 . ,displayed-img-width))))))
+        (let ((pix-spec (if doc-view-roll-minor-mode
+                            (list displayed-img-width)
+                          displayed-img-width)))
+	  (overlay-put ol 'before-string
+		       (when (and image (> window-width displayed-img-width))
+		         (propertize " " 'display
+				     `(space :align-to (+ center (-0.5 . ,pix-spec)))))))
 	(overlay-put ol 'display
 		     (cond
 		      (image
@@ -1576,16 +1669,17 @@ ARGS is a list of image descriptors."
 		       ;; the problem.
 		       (concat "Cannot display this page!\n"
 			       "Maybe because of a conversion failure!"))))
-	(let ((win (overlay-get ol 'window)))
-	  (if (stringp (overlay-get ol 'display))
-	      (progn            ;Make sure the text is not scrolled out of view.
-		(set-window-hscroll win 0)
-		(set-window-vscroll win 0))
-	    (let ((hscroll (image-mode-window-get 'hscroll win))
-		  (vscroll (image-mode-window-get 'vscroll win)))
-	      ;; Reset scroll settings, in case they were changed.
-	      (if hscroll (set-window-hscroll win hscroll))
-	      (if vscroll (set-window-vscroll win vscroll t)))))))))
+	(unless doc-view-roll-minor-mode
+          (let ((win (overlay-get ol 'window)))
+	   (if (stringp (overlay-get ol 'display))
+	       (progn            ;Make sure the text is not scrolled out of view.
+		 (set-window-hscroll win 0)
+		 (set-window-vscroll win 0))
+	     (let ((hscroll (image-mode-window-get 'hscroll win))
+		   (vscroll (image-mode-window-get 'vscroll win)))
+	       ;; Reset scroll settings, in case they were changed.
+	       (if hscroll (set-window-hscroll win hscroll))
+	       (if vscroll (set-window-vscroll win vscroll t))))))))))
 
 (defun doc-view-sort (a b)
   "Return non-nil if A should be sorted before B.
