@@ -1550,19 +1550,19 @@ continuous scrolling."
 
   ;; (unless (doc-view-already-converted-p)
   ;;   (user-error "Document conversion not finished yet"))
-  (add-hook 'window-configuration-change-hook 'image-roll--redisplay nil t)
+  (add-hook 'window-configuration-change-hook 'image-roll-redisplay nil t)
 
   (remove-hook 'image-mode-new-window-functions
 	    #'doc-view-new-window-function t)
-  (add-hook 'window-configuration-change-hook 'image-roll--redisplay nil t)
-  (add-hook 'image-mode-new-window-functions 'image-roll--new-window-function nil t)
+  (add-hook 'window-configuration-change-hook 'image-roll-redisplay nil t)
+  (add-hook 'image-mode-new-window-functions 'image-roll-new-window-function nil t)
   (unless (listp image-mode-winprops-alist)
     (setq image-mode-winprops-alist nil))
 
   (let ((inhibit-read-only t))
     (erase-buffer)
-    (image-roll--new-window-function (list (selected-window))))
-  (image-roll--redisplay))
+    (image-roll-new-window-function (list (selected-window))))
+  (image-roll-redisplay))
 
 ;;;; Display
 
