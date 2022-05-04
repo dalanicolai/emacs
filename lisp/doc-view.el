@@ -675,7 +675,9 @@ Typically \"page-%s.png\".")
 (defun doc-view-next-page (&optional arg)
   "Browse ARG pages forward."
   (interactive "p")
-  (doc-view-goto-page (+ (doc-view-current-page) (or arg 1))))
+  (if doc-view-roll-minor-mode
+      (image-roll-next-page arg)
+    (doc-view-goto-page (+ (doc-view-current-page) (or arg 1)))))
 
 (defun doc-view-previous-page (&optional arg)
   "Browse ARG pages backward."
