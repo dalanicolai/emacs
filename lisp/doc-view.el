@@ -274,7 +274,7 @@ scaling."
   :version "24.4"
   :type 'boolean)
 
-(defcustom doc-view-image-width 850
+(defcustom doc-view-image-width 1200
   "Default image width.
 Has only an effect if `doc-view-scale-internally' is non-nil and support for
 scaling is compiled into Emacs."
@@ -682,7 +682,9 @@ Typically \"page-%s.png\".")
 (defun doc-view-previous-page (&optional arg)
   "Browse ARG pages backward."
   (interactive "p")
-  (doc-view-goto-page (- (doc-view-current-page) (or arg 1))))
+  (if doc-view-roll-minor-mode
+      (image-roll-next-page (- arg))
+    (doc-view-goto-page (- (doc-view-current-page) (or arg 1)))))
 
 (defun doc-view-first-page ()
   "View the first page."
@@ -728,7 +730,7 @@ Otherwise, goto previous page only on typing DEL (ARG is nil)."
 	  (set-window-hscroll (selected-window) hscroll)))
     (image-scroll-down arg)))
 
-(defun doc-view-next-line-or-next-page (&optional arg)
+(defun doc-view--next-line-or-next-page (&optional arg)
   "Scroll upward by ARG lines if possible, else goto next page.
 When `doc-view-continuous' is non-nil, scrolling a line upward
 at the bottom edge of the page moves to the next page."
@@ -744,7 +746,13 @@ at the bottom edge of the page moves to the next page."
 	  (set-window-hscroll (selected-window) hscroll)))
     (image-next-line arg)))
 
-(defun doc-view-previous-line-or-previous-page (&optional arg)
+(defun doc-view-next-line-or-next-page (&optional arg)
+  (interactive "p")
+  (if doc-view-roll-minor-mode
+      (dotimes (_ arg) (image-roll-scroll-forward))
+    (doc-view--next-line-or-next-page arg)))
+
+(defun doc-view--previous-line-or-previous-page (&optional arg)
   "Scroll downward by ARG lines if possible, else goto previous page.
 When `doc-view-continuous' is non-nil, scrolling a line downward
 at the top edge of the page moves to the previous page."
@@ -759,6 +767,12 @@ at the top edge of the page moves to the previous page."
 	    (image-bol 1))
 	  (set-window-hscroll (selected-window) hscroll)))
     (image-previous-line arg)))
+
+(defun doc-view-previous-line-or-previous-page (&optional arg)
+  (interactive "p")
+  (if doc-view-roll-minor-mode
+      (dotimes (_ arg) (image-roll-scroll-backward))
+    (doc-view--previous-line-or-previous-page arg)))
 
 ;;;; Utility Functions
 
@@ -2093,6 +2107,43 @@ If BACKWARD is non-nil, jump to the previous match."
 (add-to-list 'desktop-buffer-mode-handlers
 	     '(doc-view-mode . doc-view-restore-desktop-buffer))
 
+(defun doc-view--imenu-create-index ()
+  (pcase doc-view-doc-type
+    ((or 'pdf 'epub) (let ((filename (buffer-file-name)))
+                       (with-temp-buffer
+                         (let ((status (call-process-shell-command
+                                        (format "mutool show '%s' outline" filename)
+                                        nil t)))
+                           (when (= status 0)
+                             (let* ((lines (split-string (buffer-string) "\n" t))
+                                    (imenu-pairs (mapcar (lambda (l)
+                                                           (let* ((split-lines (split-string l "\""))
+                                                                  (page-num (string-to-number
+                                                                             (nth 1 (split-string (nth 2 split-lines) "[#,]")))))
+                                                             (cons (nth 1 split-lines) page-num)))
+                                                         lines)))
+                               (print imenu-pairs)))))))
+    ('djvu (let* ((filename (buffer-file-name))
+                  (bookmarks (with-temp-buffer
+                               (call-process-shell-command
+                                (format "djvused '%s' -e 'print-outline'" (print filename))
+                                nil t)
+                               (when (> (buffer-size) 0)
+                                 (while (search-backward "#" nil t)
+                                   (replace-match ""))
+                                 (goto-char (point-min))
+                                 (cdr (read (current-buffer))))))
+                  index)
+
+             (defun doc-view--djvu-push-bookmarks (bmarks)
+               (dolist (e bmarks)
+                 (if-let (b (cddr e))
+                     (doc-view--djvu-push-bookmarks b)
+                   (push (cons (car e) (string-to-number (cadr e))) index)))
+               (reverse index))
+
+             (doc-view--djvu-push-bookmarks bookmarks)))))
+
 ;;;###autoload
 (defun doc-view-mode ()
   "Major mode in DocView buffers.
@@ -2122,6 +2173,11 @@ toggle between displaying the document or editing it as text.
     (doc-view-set-up-single-converter)
     (unless (memq doc-view-doc-type '(ps))
       (setq-local require-final-newline nil))
+
+    (setq imenu-create-index-function #'doc-view--imenu-create-index)
+    (setq imenu-default-goto-function
+          (lambda (_name position &rest _rest)
+            (doc-view-goto-page position)))
 
     ;; These modes will just display "1", so they're not very useful
     ;; in this mode.
