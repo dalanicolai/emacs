@@ -223,7 +223,7 @@ are available (see Info node `(emacs)Document View')"
   :type 'string
   :version "27.1")
 
-(defcustom doc-view-resolution 100
+(defcustom doc-view-resolution 150
   "Dots per inch resolution used to render the documents.
 Higher values result in larger images."
   :type 'number)
@@ -2123,26 +2123,25 @@ If BACKWARD is non-nil, jump to the previous match."
                                                              (cons (nth 1 split-lines) page-num)))
                                                          lines)))
                                (print imenu-pairs)))))))
-    ('djvu (let* ((filename (buffer-file-name))
-                  (bookmarks (with-temp-buffer
-                               (call-process-shell-command
-                                (format "djvused '%s' -e 'print-outline'" (print filename))
-                                nil t)
-                               (when (> (buffer-size) 0)
-                                 (while (search-backward "#" nil t)
-                                   (replace-match ""))
-                                 (goto-char (point-min))
-                                 (cdr (read (current-buffer))))))
-                  index)
+    ('djvu (letrec ((filename (buffer-file-name))
+                    (bookmarks (with-temp-buffer
+                                 (call-process-shell-command
+                                  (format "djvused '%s' -e 'print-outline'" (print filename))
+                                  nil t)
+                                 (when (> (buffer-size) 0)
+                                   (while (search-backward "#" nil t)
+                                     (replace-match ""))
+                                   (goto-char (point-min))
+                                   (cdr (read (current-buffer))))))
+                    (index nil)
+                    (doc-view--djvu-push-bookmarks (lambda (bmarks)
+                                                     (dolist (e bmarks)
+                                                       (if-let (b (cddr e))
+                                                           (funcall doc-view--djvu-push-bookmarks b)
+                                                         (push (cons (car e) (string-to-number (cadr e))) index)))
+                                                     (reverse index))))
 
-             (defun doc-view--djvu-push-bookmarks (bmarks)
-               (dolist (e bmarks)
-                 (if-let (b (cddr e))
-                     (doc-view--djvu-push-bookmarks b)
-                   (push (cons (car e) (string-to-number (cadr e))) index)))
-               (reverse index))
-
-             (doc-view--djvu-push-bookmarks bookmarks)))))
+             (funcall doc-view--djvu-push-bookmarks bookmarks)))))
 
 ;;;###autoload
 (defun doc-view-mode ()
